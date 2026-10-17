@@ -1,0 +1,14 @@
+{
+  "name": "socketfabric-sdk-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  },
+  "engines": { "node": ">=22" }
+}

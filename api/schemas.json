@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "Identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "RequestID": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "Event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eventId", "projectId", "type", "roomId", "data", "timestamp"],
+      "properties": {
+        "eventId": { "$ref": "#/definitions/Identifier" },
+        "projectId": { "$ref": "#/definitions/Identifier" },
+        "type": { "$ref": "#/definitions/Identifier" },
+        "roomId": { "$ref": "#/definitions/Identifier" },
+        "data": true,
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    },
+    "APIError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "requestId"],
+      "properties": {
+        "code": { "$ref": "#/definitions/Identifier" },
+        "message": { "type": "string" },
+        "requestId": { "$ref": "#/definitions/RequestID" }
+      }
+    }
+  }
+}

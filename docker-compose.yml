@@ -1,0 +1,61 @@
+services:
+  app:
+    build: .
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      SOCKETFABRIC_MODE: ${SOCKETFABRIC_MODE:-single}
+      NODE_ID: ${NODE_ID:-}
+      HTTP_HOST: ${HTTP_HOST:-0.0.0.0}
+      HTTP_PORT: ${HTTP_PORT:-8080}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      HTTP_READ_HEADER_TIMEOUT: ${HTTP_READ_HEADER_TIMEOUT:-5s}
+      HTTP_READ_TIMEOUT: ${HTTP_READ_TIMEOUT:-15s}
+      HTTP_WRITE_TIMEOUT: ${HTTP_WRITE_TIMEOUT:-15s}
+      HTTP_IDLE_TIMEOUT: ${HTTP_IDLE_TIMEOUT:-60s}
+      SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT:-10s}
+      CLIENT_TOKEN_SECRET: ${CLIENT_TOKEN_SECRET:?Set CLIENT_TOKEN_SECRET to an independent secret of at least 32 bytes}
+      PUBLISHER_KEYS_JSON: ${PUBLISHER_KEYS_JSON:?Set PUBLISHER_KEYS_JSON to the project-to-key JSON mapping}
+      WS_QUEUE_CAPACITY: ${WS_QUEUE_CAPACITY:-32}
+      WS_MAX_CONNECTIONS: ${WS_MAX_CONNECTIONS:-256}
+      WS_MAX_MESSAGE_BYTES: ${WS_MAX_MESSAGE_BYTES:-16384}
+      WS_AUTH_TIMEOUT: ${WS_AUTH_TIMEOUT:-5s}
+      WS_WRITE_TIMEOUT: ${WS_WRITE_TIMEOUT:-5s}
+      WS_PING_INTERVAL: ${WS_PING_INTERVAL:-30s}
+      WS_PONG_TIMEOUT: ${WS_PONG_TIMEOUT:-10s}
+      WS_IDLE_TIMEOUT: ${WS_IDLE_TIMEOUT:-0s}
+      # A null value inherits the setting when present and omits it when unset.
+      WS_ALLOWED_ORIGINS:
+      DEMO_ENABLED: ${DEMO_ENABLED:-false}
+      MANAGEMENT_ENABLED: ${MANAGEMENT_ENABLED:-false}
+      DATABASE_URL:
+      DATABASE_MAX_CONNS:
+      DATABASE_CONNECT_TIMEOUT:
+      DATABASE_QUERY_TIMEOUT:
+      MANAGEMENT_SESSION_TTL:
+      MANAGEMENT_MAX_PROJECTS:
+      MANAGEMENT_POLICY_REFRESH_INTERVAL:
+      MANAGEMENT_POLICY_MAX_AGE:
+      MANAGEMENT_ALLOW_INSECURE_HTTP:
+      MANAGEMENT_TRUSTED_PROXY_CIDRS:
+      # Optional in this single-service setup; ignored unless distributed mode is selected.
+      NATS_URL:
+      NATS_TOKEN:
+      NATS_SUBJECT_PREFIX:
+      NATS_CONNECT_TIMEOUT:
+      NATS_PUBLISH_TIMEOUT:
+      GIN_MODE: release
+    ports:
+      - "${HTTP_PORT:-8080}:${HTTP_PORT:-8080}"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:$${HTTP_PORT}/readyz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    stop_grace_period: 15s

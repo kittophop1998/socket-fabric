@@ -1,0 +1,856 @@
+openapi: 3.1.1
+info:
+  title: SocketFabric Gateway API
+  version: 0.1.0
+  summary: HTTP and WebSocket gateway contracts
+  description: >-
+    Contract for the SocketFabric gateway. Delivery is best-effort; successful
+    HTTP publication does not confirm browser receipt or processing.
+  contact:
+    name: SocketFabric maintainers
+servers:
+  - url: http://localhost:8080
+    description: Local development. Use HTTPS/WSS across trust boundaries.
+tags:
+  - name: Infrastructure
+  - name: Realtime
+  - name: Management
+  - name: Development
+paths:
+  /healthz:
+    get:
+      operationId: getLiveness
+      summary: Check process liveness
+      description: Returns process liveness. It does not report broker or cluster health.
+      tags: [Infrastructure]
+      security: []
+      responses:
+        '200':
+          description: Process is serving requests.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+              example: { status: ok }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /readyz:
+    get:
+      operationId: getReadiness
+      summary: Check local gateway readiness
+      description: Distributed mode requires a ready NATS connection. Management database availability is reported separately and does not necessarily make the data plane unready.
+      tags: [Infrastructure]
+      security: []
+      responses:
+        '200':
+          description: Local gateway is ready.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Readiness' }
+              example: { status: ready }
+        '503': { $ref: '#/components/responses/NotReady' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /ws:
+    get:
+      operationId: upgradeWebSocket
+      summary: Upgrade to the SocketFabric WebSocket protocol
+      description: >-
+        This HTTP handshake uses no query-string or Authorization-header client
+        authentication. After a successful 101 upgrade, the client must send
+        an auth JSON frame containing a short-lived project-scoped client JWT
+        as the first text message. See the AsyncAPI contract. Browser origins
+        are checked against WS_ALLOWED_ORIGINS or the same-origin default.
+      tags: [Realtime]
+      security: []
+      responses:
+        '101': { description: WebSocket protocol upgrade succeeded. }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '426':
+          description: A valid WebSocket upgrade was not requested.
+          headers:
+            Upgrade:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '503':
+          description: Gateway is not ready or connection capacity is exhausted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                notReady:
+                  value: { error: { code: not_ready, message: Service not ready, requestId: req_01 } }
+                capacity:
+                  value: { error: { code: capacity_exceeded, message: Connection capacity reached, requestId: req_01 } }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /v1/events:
+    post:
+      operationId: publishEvent
+      summary: Publish an event to one project room
+      description: >-
+        A trusted backend publisher may publish to any room in its authenticated
+        project. projectId in the body must match the publisher scope. The
+        returned queuedConnections counts local outbound queues at this gateway
+        only. In distributed mode acceptance by NATS is still not browser
+        delivery confirmation. No automatic retry, replay, persistence or
+        exactly-once delivery is provided.
+      tags: [Realtime]
+      security:
+        - PublisherKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PublishRequest' }
+            examples:
+              resourceUpdated:
+                value:
+                  projectId: project-a
+                  roomId: room-123
+                  type: resource.updated
+                  data: { status: completed }
+      responses:
+        '202':
+          description: Event accepted by the local router (or NATS in distributed mode).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublishResult' }
+              example:
+                event:
+                  eventId: evt_01J8ZB5Y8TFJ2M4Q6W8K0P3N7R
+                  projectId: project-a
+                  type: resource.updated
+                  roomId: room-123
+                  data: { status: completed }
+                  timestamp: '2026-10-16T10:00:00Z'
+                queuedConnections: 2
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/UnauthorizedPublisher' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '503': { $ref: '#/components/responses/NotReady' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /demo:
+    get:
+      operationId: getDevelopmentDemo
+      summary: Load the optional browser demo
+      description: Registered only when DEMO_ENABLED is true. Returns the built-in HTML asset without authentication.
+      tags: [Development]
+      security: []
+      x-socketfabric-feature: demo
+      responses:
+        '200':
+          description: Demo HTML document.
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+            X-Content-Type-Options: { schema: { type: string, const: nosniff } }
+          content:
+            text/html:
+              schema: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /demo.js:
+    get:
+      operationId: getDevelopmentDemoScript
+      summary: Load the optional browser demo script
+      description: Registered only when DEMO_ENABLED is true. Returns the built-in JavaScript asset without authentication.
+      tags: [Development]
+      security: []
+      x-socketfabric-feature: demo
+      responses:
+        '200':
+          description: Demo JavaScript asset.
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+            X-Content-Type-Options: { schema: { type: string, const: nosniff } }
+          content:
+            text/javascript:
+              schema: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /admin/v1/auth/login:
+    post:
+      operationId: loginOperator
+      summary: Start an operator session
+      description: Management must be enabled and ready; HTTPS is required unless the explicit development HTTP override is active. Generic credential failures and per-node login rate limiting apply. The plaintext opaque session token is returned once and expires according to MANAGEMENT_SESSION_TTL (default 15 minutes, maximum 1 hour). There is no refresh endpoint.
+      tags: [Management]
+      x-socketfabric-feature: management
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+            example: { email: admin@example.com, password: example-password }
+      responses:
+        '200':
+          description: Authenticated operator and newly issued session token.
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+            X-Content-Type-Options: { schema: { type: string, const: nosniff } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResult' }
+        '400': { $ref: '#/components/responses/InvalidManagementRequest' }
+        '401': { $ref: '#/components/responses/UnauthorizedLogin' }
+        '413': { $ref: '#/components/responses/ManagementPayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '403': { $ref: '#/components/responses/ManagementHTTPSRequired' }
+        '503': { $ref: '#/components/responses/ManagementUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /admin/v1/auth/logout:
+    post:
+      operationId: logoutOperator
+      summary: Revoke the current operator session
+      tags: [Management]
+      x-socketfabric-feature: management
+      x-socketfabric-roles: [admin, viewer]
+      security: [{ OperatorSession: [] }]
+      responses:
+        '204': { description: Session revoked; response has no body. }
+        '401': { $ref: '#/components/responses/UnauthorizedOperator' }
+        '403': { $ref: '#/components/responses/ManagementHTTPSRequired' }
+        '503': { $ref: '#/components/responses/ManagementUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /admin/v1/auth/me:
+    get:
+      operationId: getCurrentOperator
+      summary: Read the current operator profile
+      tags: [Management]
+      x-socketfabric-feature: management
+      x-socketfabric-roles: [admin, viewer]
+      security: [{ OperatorSession: [] }]
+      responses:
+        '200':
+          description: Operator metadata without password hashes or session secrets.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Operator' }
+        '401': { $ref: '#/components/responses/UnauthorizedOperator' }
+        '403': { $ref: '#/components/responses/ManagementHTTPSRequired' }
+        '503': { $ref: '#/components/responses/ManagementUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /admin/v1/projects:
+    get:
+      operationId: listProjects
+      summary: List database-managed projects
+      description: ENV projects are reserved by runtime configuration and are not listed here. Viewer and Admin may read managed projects.
+      tags: [Management]
+      x-socketfabric-feature: management
+      x-socketfabric-roles: [admin, viewer]
+      security: [{ OperatorSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: status
+          in: query
+          description: Filter by exact project status.
+          schema: { type: string, enum: [enabled, disabled] }
+        - name: name
+          in: query
+          description: Case-insensitive literal substring filter; implementation limit is 200 UTF-8 bytes.
+          schema: { type: string, maxLength: 200 }
+      responses:
+        '200':
+          description: Projects ordered by stable ascending ID cursor.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/Page' }
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/Project' } }
+              example:
+                items: [{ id: project-a, name: Project A, status: enabled, createdAt: '2026-10-16T10:00:00Z', updatedAt: '2026-10-16T10:00:00Z' }]
+                nextCursor: project-a
+        '400': { $ref: '#/components/responses/InvalidManagementRequest' }
+        '401': { $ref: '#/components/responses/UnauthorizedOperator' }
+        '403': { $ref: '#/components/responses/ManagementHTTPSRequired' }
+        '503': { $ref: '#/components/responses/ManagementUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: createProject
+      summary: Create a managed project
+      description: Admin only. IDs must be unique and cannot collide with reserved ENV projects. Omitted, null or empty status defaults to enabled. Names are trimmed before validation; maximum stored name length is 200 Unicode code points.
+      tags: [Management]
+      x-socketfabric-feature: management
+      x-socketfabric-roles: [admin]
+      security: [{ OperatorSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateProjectRequest' }
+            examples:
+              defaultEnabled: { value: { id: project-a, name: Project A } }
+              explicitStatus: { value: { id: project-b, name: Project B, status: disabled } }
+      responses:
+        '201':
+          description: Created project metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '400': { $ref: '#/components/responses/InvalidManagementRequest' }
+        '401': { $ref: '#/components/responses/UnauthorizedOperator' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/ManagementPayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '503': { $ref: '#/components/responses/ManagementUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /admin/v1/projects/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      operationId: getProject
+      summary: Read a managed project
+      tags: [Management]
+      x-socketfabric-feature: management
+      x-socketfabric-roles: [admin, viewer]
+      security: [{ OperatorSession: [] }]
+      responses:
+        '200':
+          description: Project metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '400': { $ref: '#/components/responses/InvalidManagementRequest' }
+        '401': { $ref: '#/components/responses/UnauthorizedOperator' }
+        '403': { $ref: '#/components/responses/ManagementHTTPSRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ManagementUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    patch:
+      operationId: updateProject
+      summary: Update a project's name or enabled status
+      description: Admin only. At least one non-null field is required. Null fields are treated as omitted; project IDs cannot be changed. Disabling a project affects future publish authorization and managed sessions according to policy propagation.
+      tags: [Management]
+      x-socketfabric-feature: management
+      x-socketfabric-roles: [admin]
+      security: [{ OperatorSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateProjectRequest' }
+            example: { status: disabled }
+      responses:
+        '200':
+          description: Updated project metadata.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '400': { $ref: '#/components/responses/InvalidManagementRequest' }
+        '401': { $ref: '#/components/responses/UnauthorizedOperator' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/ManagementPayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '503': { $ref: '#/components/responses/ManagementUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /admin/v1/projects/{id}/keys:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+    get:
+      operationId: listProjectCredentials
+      summary: List publisher credential metadata
+      description: Admin only. Plaintext keys and stored hashes are never returned by this operation.
+      tags: [Management]
+      x-socketfabric-feature: management
+      x-socketfabric-roles: [admin]
+      security: [{ OperatorSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Credential metadata ordered by stable ID cursor.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/Page' }
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/PublisherCredential' } }
+        '400': { $ref: '#/components/responses/InvalidManagementRequest' }
+        '401': { $ref: '#/components/responses/UnauthorizedOperator' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ManagementUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      operationId: createProjectCredential
+      summary: Create a publisher credential
+      description: Admin only. The high-entropy plaintext key is returned once after transaction commit. Omitted or null expiresAt means no expiry; a supplied expiry must be in the future. Managed credentials are checked against PostgreSQL on each publish.
+      tags: [Management]
+      x-socketfabric-feature: management
+      x-socketfabric-roles: [admin]
+      security: [{ OperatorSession: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateCredentialRequest' }
+            examples:
+              noExpiry: { value: {} }
+              expiring: { value: { expiresAt: '2030-01-01T00:00:00Z' } }
+      responses:
+        '201':
+          description: Credential metadata and one-time plaintext publisher key.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreateCredentialResult' }
+        '400': { $ref: '#/components/responses/InvalidManagementRequest' }
+        '401': { $ref: '#/components/responses/UnauthorizedOperator' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/ManagementPayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '503': { $ref: '#/components/responses/ManagementUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /admin/v1/projects/{id}/keys/{keyId}:
+    parameters:
+      - $ref: '#/components/parameters/ProjectID'
+      - name: keyId
+        in: path
+        required: true
+        description: Credential resource ID, not the secret key or key identifier.
+        schema: { $ref: '#/components/schemas/Identifier' }
+    delete:
+      operationId: revokeProjectCredential
+      summary: Revoke a publisher credential
+      description: Admin only. Revocation is scoped to the path project and is idempotent for an existing credential. After commit, new managed-key authentication queries on the same PostgreSQL primary reject the key; already authorized requests may finish. There is no credential cache or global in-flight cancellation.
+      tags: [Management]
+      x-socketfabric-feature: management
+      x-socketfabric-roles: [admin]
+      security: [{ OperatorSession: [] }]
+      responses:
+        '204': { description: Credential revoked; response has no body. }
+        '400': { $ref: '#/components/responses/InvalidManagementRequest' }
+        '401': { $ref: '#/components/responses/UnauthorizedOperator' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ManagementUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /admin/v1/diagnostics/overview:
+    get:
+      operationId: getDiagnosticsOverview
+      summary: Read local node diagnostics
+      description: Admin and Viewer may read this process's approximate snapshot. It is not cluster aggregation.
+      tags: [Management]
+      x-socketfabric-feature: management
+      x-socketfabric-roles: [admin, viewer]
+      security: [{ OperatorSession: [] }]
+      responses:
+        '200':
+          description: Observable local node, broker, optional management policy and live metrics.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DiagnosticsOverview' }
+        '401': { $ref: '#/components/responses/UnauthorizedOperator' }
+        '403': { $ref: '#/components/responses/ManagementHTTPSRequired' }
+        '503': { $ref: '#/components/responses/ManagementUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /admin/v1/diagnostics/nodes:
+    get:
+      operationId: listDiagnosticsNodes
+      summary: Read the local node list
+      description: The response contains only this node and declares clusterVisibility unavailable.
+      tags: [Management]
+      x-socketfabric-feature: management
+      x-socketfabric-roles: [admin, viewer]
+      security: [{ OperatorSession: [] }]
+      responses:
+        '200':
+          description: A local-only node snapshot.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DiagnosticsNodes' }
+        '401': { $ref: '#/components/responses/UnauthorizedOperator' }
+        '403': { $ref: '#/components/responses/ManagementHTTPSRequired' }
+        '503': { $ref: '#/components/responses/ManagementUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /admin/v1/diagnostics/metrics:
+    get:
+      operationId: getDiagnosticsMetrics
+      summary: Read current local metrics
+      description: Gauges and active-session counters only. Historical counters and cluster-wide metrics are unavailable.
+      tags: [Management]
+      x-socketfabric-feature: management
+      x-socketfabric-roles: [admin, viewer]
+      security: [{ OperatorSession: [] }]
+      responses:
+        '200':
+          description: Local metric snapshot with unavailable history explicitly identified.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DiagnosticsMetrics' }
+        '401': { $ref: '#/components/responses/UnauthorizedOperator' }
+        '403': { $ref: '#/components/responses/ManagementHTTPSRequired' }
+        '503': { $ref: '#/components/responses/ManagementUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+  /admin/v1/audit-logs:
+    get:
+      operationId: listAuditLogs
+      summary: List management audit records
+      description: Admin only. Metadata is sanitized; no bodies, passwords, tokens, publisher keys or event payloads are recorded.
+      tags: [Management]
+      x-socketfabric-feature: management
+      x-socketfabric-roles: [admin]
+      security: [{ OperatorSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - name: action
+          in: query
+          description: Exact action filter.
+          schema: { type: string, maxLength: 128 }
+        - name: actorId
+          in: query
+          description: Exact operator ID filter.
+          schema: { $ref: '#/components/schemas/Identifier' }
+      responses:
+        '200':
+          description: Audit logs ordered by stable ID cursor; actorId is null for system actions.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/Page' }
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/AuditLog' } }
+        '400': { $ref: '#/components/responses/InvalidManagementRequest' }
+        '401': { $ref: '#/components/responses/UnauthorizedOperator' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ManagementUnavailable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+components:
+  securitySchemes:
+    PublisherKey:
+      type: http
+      scheme: bearer
+      description: Project-scoped publisher API key from trusted deployment configuration or one-time Management credential creation. Never expose it to browsers.
+    OperatorSession:
+      type: http
+      scheme: bearer
+      description: Opaque operator session returned by Management login; database-backed expiry/revocation is checked on each request. This is not a client JWT or publisher key.
+  parameters:
+    ProjectID:
+      name: id
+      in: path
+      required: true
+      description: Project ID using 1–128 ASCII letters, digits, dot, underscore, colon or hyphen.
+      schema: { $ref: '#/components/schemas/Identifier' }
+    Limit:
+      name: limit
+      in: query
+      description: Page size; duplicate query parameters are rejected.
+      schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+    Cursor:
+      name: cursor
+      in: query
+      description: Stable ascending resource ID from the previous nextCursor. A full final page may still return a cursor followed by an empty page.
+      schema: { $ref: '#/components/schemas/Identifier' }
+  responses:
+    InvalidRequest:
+      description: Invalid JSON, missing fields, unknown fields, invalid identifiers or multiple JSON values.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    InvalidManagementRequest:
+      description: Invalid JSON, unknown fields, invalid query values or failed application validation.
+      headers: { Cache-Control: { schema: { type: string, const: no-store } } }
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    UnauthorizedPublisher:
+      description: Publisher credentials are missing, invalid, expired or revoked.
+      headers: { WWW-Authenticate: { schema: { type: string, const: Bearer } } }
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' }, example: { error: { code: unauthorized, message: Invalid publisher credentials, requestId: req_01 } } } }
+    UnauthorizedOperator:
+      description: Operator session is missing, invalid, expired, revoked or disabled.
+      headers:
+        WWW-Authenticate: { schema: { type: string, const: Bearer } }
+        Cache-Control: { schema: { type: string, const: no-store } }
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    UnauthorizedLogin:
+      description: Generic response for invalid operator credentials.
+      headers: { Cache-Control: { schema: { type: string, const: no-store } } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example: { error: { code: unauthorized, message: Authentication required, requestId: req_01 } }
+    Forbidden:
+      description: Authenticated identity lacks the required role or project scope.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    ManagementHTTPSRequired:
+      description: Management requires TLS unless explicit insecure development mode is enabled.
+      headers:
+        Cache-Control: { schema: { type: string, const: no-store } }
+        X-Content-Type-Options: { schema: { type: string, const: nosniff } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example: { error: { code: https_required, message: Management requires HTTPS, requestId: req_01 } }
+    NotFound:
+      description: Route or resource not found. Disabled feature routes also use the global 404 contract.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    Conflict:
+      description: Duplicate or reserved project identity, or configured project capacity reached.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    PayloadTooLarge:
+      description: Publish JSON body exceeds 64 KiB.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    ManagementPayloadTooLarge:
+      description: Management JSON body exceeds 16 KiB.
+      headers: { Cache-Control: { schema: { type: string, const: no-store } } }
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    UnsupportedMediaType:
+      description: Content-Type must be application/json.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    RateLimited:
+      description: Per-node operator login attempt limit reached.
+      headers:
+        Retry-After: { schema: { type: string, const: '60' } }
+        Cache-Control: { schema: { type: string, const: no-store } }
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    NotReady:
+      description: Local gateway or required broker is not ready.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example: { error: { code: not_ready, message: Service not ready, requestId: req_01 } }
+    ManagementUnavailable:
+      description: Management database/schema/policy is unavailable. Disabled management routes are absent and resolve through global 404; HTTP without required TLS returns 403 instead.
+      headers:
+        Cache-Control: { schema: { type: string, const: no-store } }
+        X-Content-Type-Options: { schema: { type: string, const: nosniff } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example: { error: { code: not_ready, message: Management unavailable, requestId: req_01 } }
+    InternalError:
+      description: Sanitized server error; internal details are not returned.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+  schemas:
+    Identifier: { $ref: './schemas.json#/definitions/Identifier' }
+    RequestID: { $ref: './schemas.json#/definitions/RequestID' }
+    Event: { $ref: './schemas.json#/definitions/Event' }
+    APIError: { $ref: './schemas.json#/definitions/APIError' }
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error: { $ref: '#/components/schemas/APIError' }
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties: { status: { type: string, const: ok } }
+    Readiness:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties: { status: { type: string, const: ready } }
+    PublishRequest:
+      type: object
+      additionalProperties: false
+      required: [projectId, type, roomId, data]
+      properties:
+        projectId: { $ref: '#/components/schemas/Identifier' }
+        type: { $ref: '#/components/schemas/Identifier' }
+        roomId: { $ref: '#/components/schemas/Identifier' }
+        data: true
+    PublishResult:
+      type: object
+      additionalProperties: false
+      required: [event, queuedConnections]
+      properties:
+        event: { $ref: '#/components/schemas/Event' }
+        queuedConnections: { type: integer, minimum: 0 }
+    Operator:
+      type: object
+      additionalProperties: false
+      required: [id, email, role, status, createdAt, updatedAt]
+      properties:
+        id: { $ref: '#/components/schemas/Identifier' }
+        email: { type: string, format: email, maxLength: 254 }
+        role: { type: string, enum: [admin, viewer] }
+        status: { type: string, enum: [active, disabled] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email: { type: string, minLength: 1, maxLength: 254, format: email }
+        password: { type: string, minLength: 1 }
+    LoginResult:
+      type: object
+      additionalProperties: false
+      required: [token, tokenType, expiresAt, operator]
+      properties:
+        token: { type: string, minLength: 1, description: Opaque secret; keep private and do not log. }
+        tokenType: { type: string, const: Bearer }
+        expiresAt: { type: string, format: date-time }
+        operator: { $ref: '#/components/schemas/Operator' }
+    Project:
+      type: object
+      additionalProperties: false
+      required: [id, name, status, createdAt, updatedAt]
+      properties:
+        id: { $ref: '#/components/schemas/Identifier' }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        status: { type: string, enum: [enabled, disabled] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CreateProjectRequest:
+      type: object
+      additionalProperties: false
+      required: [id, name]
+      properties:
+        id: { $ref: '#/components/schemas/Identifier' }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        status: { type: [string, 'null'], enum: ['', enabled, disabled, null], default: enabled }
+    UpdateProjectRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          anyOf:
+            - { type: string, minLength: 1, maxLength: 200 }
+            - { type: 'null' }
+        status:
+          anyOf:
+            - { type: string, enum: [enabled, disabled] }
+            - { type: 'null' }
+      anyOf:
+        - required: [name]
+          properties: { name: { not: { type: 'null' } } }
+        - required: [status]
+          properties: { status: { not: { type: 'null' } } }
+    Page:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items: { type: array }
+        nextCursor: { $ref: '#/components/schemas/Identifier' }
+    PublisherCredential:
+      type: object
+      additionalProperties: false
+      required: [id, projectId, keyIdentifier, status, createdAt, expiresAt, revokedAt]
+      properties:
+        id: { $ref: '#/components/schemas/Identifier' }
+        projectId: { $ref: '#/components/schemas/Identifier' }
+        keyIdentifier: { $ref: '#/components/schemas/Identifier' }
+        status: { type: string, enum: [active, revoked, expired] }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: [string, 'null'], format: date-time }
+        revokedAt: { type: [string, 'null'], format: date-time }
+    CreateCredentialRequest:
+      type: [object, 'null']
+      additionalProperties: false
+      properties:
+        expiresAt: { type: [string, 'null'], format: date-time }
+    CreateCredentialResult:
+      type: object
+      additionalProperties: false
+      required: [credential, key]
+      properties:
+        credential: { $ref: '#/components/schemas/PublisherCredential' }
+        key: { type: string, minLength: 1, description: Returned once. Store in a trusted secret manager. }
+    AuditLog:
+      type: object
+      additionalProperties: false
+      required: [id, actorId, action, resourceType, resourceId, timestamp, metadata]
+      properties:
+        id: { $ref: '#/components/schemas/Identifier' }
+        actorId: { anyOf: [{ $ref: '#/components/schemas/Identifier' }, { type: 'null' }] }
+        action: { type: string, minLength: 1 }
+        resourceType: { type: string, minLength: 1 }
+        resourceId: { type: string }
+        timestamp: { type: string, format: date-time }
+        metadata:
+          type: object
+          additionalProperties: false
+          properties:
+            requestId: { $ref: '#/components/schemas/RequestID' }
+    DiagnosticsNode:
+      type: object
+      additionalProperties: false
+      required: [id, mode, ready]
+      properties:
+        id: { type: string, minLength: 1 }
+        mode: { type: string, enum: [single, distributed] }
+        ready: { type: boolean }
+    BrokerSnapshot:
+      type: object
+      additionalProperties: false
+      required: [required, ready]
+      properties:
+        required: { type: boolean }
+        ready: { type: [boolean, 'null'] }
+    ManagementSnapshot:
+      type: [object, 'null']
+      additionalProperties: false
+      required: [databaseReady, policyAgeMs, policyMaxAgeMs, managedProjectCount, ready]
+      properties:
+        databaseReady: { type: boolean }
+        policyAgeMs: { type: [integer, 'null'], minimum: 0 }
+        policyMaxAgeMs: { type: integer, minimum: 0 }
+        managedProjectCount: { type: integer, minimum: 0 }
+        ready: { type: boolean }
+    Metrics:
+      type: object
+      additionalProperties: false
+      required: [pendingConnections, connections, maxConnections, authenticatedConnections, queueDepth, queueCapacity, activeSessionQueueHighWaterSum, activeSessionEventsAccepted, activeSessionEventsWritten, activeSessionEventsRejected, activeSessionEventsDiscarded, registeredConnections, rooms, memberships]
+      properties:
+        pendingConnections: { type: integer, minimum: 0 }
+        connections: { type: integer, minimum: 0 }
+        maxConnections: { type: integer, minimum: 0 }
+        authenticatedConnections: { type: integer, minimum: 0 }
+        queueDepth: { type: integer, minimum: 0 }
+        queueCapacity: { type: integer, minimum: 0 }
+        activeSessionQueueHighWaterSum: { type: integer, minimum: 0 }
+        activeSessionEventsAccepted: { type: integer, minimum: 0, format: uint64 }
+        activeSessionEventsWritten: { type: integer, minimum: 0, format: uint64 }
+        activeSessionEventsRejected: { type: integer, minimum: 0, format: uint64 }
+        activeSessionEventsDiscarded: { type: integer, minimum: 0, format: uint64 }
+        registeredConnections: { type: integer, minimum: 0 }
+        rooms: { type: integer, minimum: 0 }
+        memberships: { type: integer, minimum: 0 }
+    DiagnosticsOverview:
+      type: object
+      additionalProperties: false
+      required: [scope, consistency, collectedAt, node, clusterVisibility, broker, management, metrics]
+      properties:
+        scope: { type: string, const: local }
+        consistency: { type: string, const: approximate }
+        collectedAt: { type: string, format: date-time }
+        node: { $ref: '#/components/schemas/DiagnosticsNode' }
+        clusterVisibility: { type: string, const: unavailable }
+        broker: { $ref: '#/components/schemas/BrokerSnapshot' }
+        management: { $ref: '#/components/schemas/ManagementSnapshot' }
+        metrics: { $ref: '#/components/schemas/Metrics' }
+    DiagnosticsNodes:
+      type: object
+      additionalProperties: false
+      required: [scope, clusterVisibility, items]
+      properties:
+        scope: { type: string, const: local }
+        clusterVisibility: { type: string, const: unavailable }
+        items: { type: array, minItems: 1, maxItems: 1, items: { $ref: '#/components/schemas/DiagnosticsNode' } }
+    DiagnosticsMetrics:
+      type: object
+      additionalProperties: false
+      required: [scope, collectedAt, metrics, historicalMetrics]
+      properties:
+        scope: { type: string, const: local }
+        collectedAt: { type: string, format: date-time }
+        metrics: { $ref: '#/components/schemas/Metrics' }
+        historicalMetrics: { type: string, const: unavailable }

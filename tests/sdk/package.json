@@ -1,0 +1,11 @@
+{
+  "name": "socketfabric-sdk-integration",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

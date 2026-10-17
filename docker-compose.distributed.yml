@@ -1,0 +1,99 @@
+x-gateway: &gateway
+  build: .
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+  environment: &gateway-environment
+    APP_ENV: ${APP_ENV:-production}
+    SOCKETFABRIC_MODE: distributed
+    HTTP_HOST: 0.0.0.0
+    HTTP_PORT: "8080"
+    LOG_LEVEL: ${LOG_LEVEL:-info}
+    HTTP_READ_HEADER_TIMEOUT: ${HTTP_READ_HEADER_TIMEOUT:-5s}
+    HTTP_READ_TIMEOUT: ${HTTP_READ_TIMEOUT:-15s}
+    HTTP_WRITE_TIMEOUT: ${HTTP_WRITE_TIMEOUT:-15s}
+    HTTP_IDLE_TIMEOUT: ${HTTP_IDLE_TIMEOUT:-60s}
+    SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT:-10s}
+    CLIENT_TOKEN_SECRET: ${CLIENT_TOKEN_SECRET:?Set CLIENT_TOKEN_SECRET to an independent secret of at least 32 bytes}
+    PUBLISHER_KEYS_JSON: ${PUBLISHER_KEYS_JSON:?Set PUBLISHER_KEYS_JSON to the project-to-key JSON mapping}
+    WS_QUEUE_CAPACITY: ${WS_QUEUE_CAPACITY:-32}
+    WS_MAX_CONNECTIONS: ${WS_MAX_CONNECTIONS:-256}
+    WS_MAX_MESSAGE_BYTES: ${WS_MAX_MESSAGE_BYTES:-16384}
+    WS_AUTH_TIMEOUT: ${WS_AUTH_TIMEOUT:-5s}
+    WS_WRITE_TIMEOUT: ${WS_WRITE_TIMEOUT:-5s}
+    WS_PING_INTERVAL: ${WS_PING_INTERVAL:-30s}
+    WS_PONG_TIMEOUT: ${WS_PONG_TIMEOUT:-10s}
+    WS_IDLE_TIMEOUT: ${WS_IDLE_TIMEOUT:-0s}
+    WS_ALLOWED_ORIGINS:
+    DEMO_ENABLED: ${DEMO_ENABLED:-false}
+    MANAGEMENT_ENABLED: ${MANAGEMENT_ENABLED:-false}
+    DATABASE_URL:
+    DATABASE_MAX_CONNS:
+    DATABASE_CONNECT_TIMEOUT:
+    DATABASE_QUERY_TIMEOUT:
+    MANAGEMENT_SESSION_TTL:
+    MANAGEMENT_MAX_PROJECTS:
+    MANAGEMENT_POLICY_REFRESH_INTERVAL:
+    MANAGEMENT_POLICY_MAX_AGE:
+    MANAGEMENT_ALLOW_INSECURE_HTTP:
+    MANAGEMENT_TRUSTED_PROXY_CIDRS:
+    NATS_URL: nats://nats:4222
+    NATS_TOKEN: ${NATS_TOKEN:?Set NATS_TOKEN to an independent broker token of at least 32 bytes}
+    NATS_SUBJECT_PREFIX: ${NATS_SUBJECT_PREFIX:-socketfabric}
+    NATS_CONNECT_TIMEOUT: ${NATS_CONNECT_TIMEOUT:-5s}
+    NATS_PUBLISH_TIMEOUT: ${NATS_PUBLISH_TIMEOUT:-2s}
+    GIN_MODE: release
+  depends_on:
+    nats:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:$${HTTP_PORT}/readyz || exit 1"]
+    interval: 5s
+    timeout: 3s
+    retries: 3
+    start_period: 5s
+  stop_grace_period: 15s
+
+services:
+  nats:
+    image: nats:2.15.1-alpine
+    # Core mode has no storage requirement; ports are unprivileged.
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    command:
+      - --auth
+      - ${NATS_TOKEN:?Set NATS_TOKEN to an independent broker token of at least 32 bytes}
+      - --http_port
+      - "8222"
+    expose:
+      - "4222"
+      - "8222"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 3s
+    stop_grace_period: 15s
+  gateway-a:
+    <<: *gateway
+    environment:
+      <<: *gateway-environment
+      NODE_ID: gateway-a
+    ports:
+      - "127.0.0.1:${GATEWAY_A_PORT:-8080}:8080"
+  gateway-b:
+    <<: *gateway
+    environment:
+      <<: *gateway-environment
+      NODE_ID: gateway-b
+    ports:
+      - "127.0.0.1:${GATEWAY_B_PORT:-8081}:8080"

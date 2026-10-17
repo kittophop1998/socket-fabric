@@ -1,0 +1,227 @@
+asyncapi: 3.0.0
+info:
+  title: SocketFabric WebSocket Protocol
+  version: 0.1.0
+  description: >-
+    Public text-frame contract for GET /ws. SocketFabric does not expose NATS
+    subjects through this protocol. Events are best-effort; there are no client
+    delivery ACKs, offline replay, persistence, or exactly-once guarantees.
+defaultContentType: application/json
+servers:
+  local:
+    host: localhost:8080
+    pathname: /ws
+    protocol: ws
+    description: Local development. Use wss in production.
+channels:
+  gateway:
+    address: /ws
+    description: One gateway WebSocket connection. Room selection is carried in JSON frames, not channel addresses.
+    messages:
+      auth: { $ref: '#/components/messages/Auth' }
+      join: { $ref: '#/components/messages/Join' }
+      leave: { $ref: '#/components/messages/Leave' }
+      authenticated: { $ref: '#/components/messages/Authenticated' }
+      joined: { $ref: '#/components/messages/Joined' }
+      left: { $ref: '#/components/messages/Left' }
+      event: { $ref: '#/components/messages/EventDelivery' }
+      error: { $ref: '#/components/messages/ProtocolError' }
+operations:
+  authenticateClient:
+    action: receive
+    channel: { $ref: '#/channels/gateway' }
+    messages: [{ $ref: '#/channels/gateway/messages/auth' }]
+    summary: Authenticate a new WebSocket connection
+    description: >-
+      The first text frame must be auth. The token is a short-lived client JWT
+      issued by the trusted application backend, scoped to one project, user
+      and up to 64 allowed rooms. The Core HTTP API has no client-token issuer.
+      Authentication happens after the HTTP 101 upgrade. Query-string and
+      Authorization-header tokens are not accepted by this implementation.
+  subscribeRoom:
+    action: receive
+    channel: { $ref: '#/channels/gateway' }
+    messages: [{ $ref: '#/channels/gateway/messages/join' }]
+    summary: Subscribe this connection to an authorized room
+    description: Join is idempotent. The server validates project and room scope on every operation and responds with joined or error.
+  unsubscribeRoom:
+    action: receive
+    channel: { $ref: '#/channels/gateway' }
+    messages: [{ $ref: '#/channels/gateway/messages/leave' }]
+    summary: Remove this connection from a room
+    description: Leave is idempotent. Messages already accepted into the connection queue may still arrive after the left response.
+  confirmAuthentication:
+    action: send
+    channel: { $ref: '#/channels/gateway' }
+    messages: [{ $ref: '#/channels/gateway/messages/authenticated' }]
+    summary: Confirm successful authentication
+  confirmSubscription:
+    action: send
+    channel: { $ref: '#/channels/gateway' }
+    messages: [{ $ref: '#/channels/gateway/messages/joined' }]
+    summary: Confirm room subscription
+  confirmUnsubscription:
+    action: send
+    channel: { $ref: '#/channels/gateway' }
+    messages: [{ $ref: '#/channels/gateway/messages/left' }]
+    summary: Confirm room unsubscription
+  deliverEvent:
+    action: send
+    channel: { $ref: '#/channels/gateway' }
+    messages: [{ $ref: '#/channels/gateway/messages/event' }]
+    summary: Deliver a routed event to a local subscribed connection
+    description: Event envelope contains the server-assigned event ID and UTC timestamp. It is not a delivery acknowledgment.
+  reportProtocolError:
+    action: send
+    channel: { $ref: '#/channels/gateway' }
+    messages: [{ $ref: '#/channels/gateway/messages/error' }]
+    summary: Report a protocol or authorization error
+    description: Some authentication and connection failures send this frame before closing. Network failures may prevent delivery of the frame or close handshake.
+components:
+  messages:
+    Auth:
+      name: Auth
+      title: Initial client authentication
+      contentType: application/json
+      payload:
+        type: object
+        additionalProperties: false
+        required: [op, token]
+        properties:
+          op: { type: string, const: auth }
+          token: { type: string, minLength: 1, description: Short-lived project-scoped client JWT. Keep it out of URLs and logs. }
+          roomId: { type: [string, 'null'], maxLength: 0, description: Optional compatibility field; must be empty. }
+      examples:
+        - name: authenticate
+          payload: { op: auth, token: <short-lived-client-jwt> }
+    Join:
+      name: Join
+      title: Subscribe to a room
+      contentType: application/json
+      payload:
+        type: object
+        additionalProperties: false
+        required: [op, roomId]
+        properties:
+          op: { type: string, const: join }
+          roomId: { $ref: './schemas.json#/definitions/Identifier' }
+          token: { type: [string, 'null'], maxLength: 0, description: If present it must be empty or null; clients normally omit it. }
+      examples:
+        - name: joinRoom
+          payload: { op: join, roomId: room-123 }
+    Leave:
+      name: Leave
+      title: Unsubscribe from a room
+      contentType: application/json
+      payload:
+        type: object
+        additionalProperties: false
+        required: [op, roomId]
+        properties:
+          op: { type: string, const: leave }
+          roomId: { $ref: './schemas.json#/definitions/Identifier' }
+          token: { type: [string, 'null'], maxLength: 0, description: If present it must be empty or null; clients normally omit it. }
+      examples:
+        - name: leaveRoom
+          payload: { op: leave, roomId: room-123 }
+    Authenticated:
+      name: Authenticated
+      title: Authenticated connection
+      contentType: application/json
+      payload:
+        type: object
+        additionalProperties: false
+        required: [op, connectionId, projectId, userId]
+        properties:
+          op: { type: string, const: authenticated }
+          connectionId: { $ref: './schemas.json#/definitions/Identifier' }
+          projectId: { $ref: './schemas.json#/definitions/Identifier' }
+          userId: { $ref: './schemas.json#/definitions/Identifier' }
+      examples:
+        - name: authenticated
+          payload: { op: authenticated, connectionId: conn_01J8ZB5Y8TFJ2M4Q6W8K0P3N7R, projectId: project-a, userId: user-123 }
+    Joined:
+      name: Joined
+      title: Room subscription accepted
+      contentType: application/json
+      payload:
+        type: object
+        additionalProperties: false
+        required: [op, roomId]
+        properties:
+          op: { type: string, const: joined }
+          roomId: { $ref: './schemas.json#/definitions/Identifier' }
+      examples:
+        - name: joined
+          payload: { op: joined, roomId: room-123 }
+    Left:
+      name: Left
+      title: Room unsubscription accepted
+      contentType: application/json
+      payload:
+        type: object
+        additionalProperties: false
+        required: [op, roomId]
+        properties:
+          op: { type: string, const: left }
+          roomId: { $ref: './schemas.json#/definitions/Identifier' }
+      examples:
+        - name: left
+          payload: { op: left, roomId: room-123 }
+    EventDelivery:
+      name: EventDelivery
+      title: Realtime event delivery
+      contentType: application/json
+      payload:
+        type: object
+        additionalProperties: false
+        required: [op, event]
+        properties:
+          op: { type: string, const: event }
+          event: { $ref: './schemas.json#/definitions/Event' }
+      examples:
+        - name: resourceUpdated
+          payload:
+            op: event
+            event:
+              eventId: evt_01J8ZB5Y8TFJ2M4Q6W8K0P3N7R
+              projectId: project-a
+              type: resource.updated
+              roomId: room-123
+              data: { status: completed }
+              timestamp: '2026-10-16T10:00:00Z'
+    ProtocolError:
+      name: ProtocolError
+      title: Protocol error
+      contentType: application/json
+      payload:
+        type: object
+        additionalProperties: false
+        required: [op, error]
+        properties:
+          op: { type: string, const: error }
+          error: { $ref: './schemas.json#/definitions/APIError' }
+      examples:
+        - name: forbiddenRoom
+          payload:
+            op: error
+            error: { code: forbidden, message: Operation not allowed for this scope, requestId: req_01 }
+x-socketfabric-runtime:
+  authenticationTimeout: Configurable WS_AUTH_TIMEOUT (default 5s); first text frame must be auth.
+  maxTextFrameBytes: Configurable WS_MAX_MESSAGE_BYTES (default 16384; maximum 1048576).
+  roomsPerClientToken: At most 64 unique allowed rooms; each room is checked again on join.
+  pingPong: WebSocket control frames managed by the server library; they are not application JSON frames.
+  reconnect: A new connection authenticates with a fresh token and explicitly joins authorized rooms. Disconnected events may be lost.
+  closeCodes:
+    '1000': Peer closed normally.
+    '1001': Gateway shutdown or configured idle timeout.
+    '1003': Client sent a binary application frame; text frames are required.
+    '1008': Authentication, token expiry or project policy violation; terminal for the current TypeScript SDK retry loop.
+    '1009': Frame exceeded the configured read limit.
+    '1011': Internal WebSocket session error.
+    '1013': Slow-client queue overflow or a retryable policy dependency failure.
+    '1006': Client-observed abnormal closure code; reserved and never sent in a close frame.
+  queue:
+    policy: Bounded FIFO per connection; overflow rejects subsequent events, discards queued messages and closes only the slow connection.
+    writeTimeout: Configurable WS_WRITE_TIMEOUT.
+    heartbeat: Configurable WS_PING_INTERVAL and WS_PONG_TIMEOUT.

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SocketFabric external integration</title>
+  <style>
+    :root { font: 16px system-ui, sans-serif; color-scheme: light dark; }
+    body { max-width: 760px; margin: 32px auto; padding: 0 20px; }
+    p { line-height: 1.5; } label { display: block; margin: 18px 0 6px; }
+    input, textarea { box-sizing: border-box; width: 100%; padding: 8px; font: inherit; }
+    textarea { min-height: 90px; font: 12px monospace; }
+    button { padding: 8px 12px; margin: 12px 6px 0 0; }
+    pre { min-height: 220px; max-height: 400px; overflow: auto; padding: 12px; border: 1px solid #888; white-space: pre-wrap; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <h1>SocketFabric external integration</h1>
+  <p>Go application API → Go SDK → SocketFabric → installed TypeScript SDK. Sign in with an application account configured by your backend. Publisher keys and signing secrets stay on the server.</p>
+  <label for="username">Application username</label>
+  <input id="username" value="alice" autocomplete="username" maxlength="128">
+  <label for="password">Application password</label>
+  <input id="password" type="password" autocomplete="off" maxlength="256">
+  <label for="gateway">Gateway</label>
+  <select id="gateway" aria-label="Gateway"></select>
+  <label for="room">Room</label>
+  <input id="room" value="room-a" autocomplete="off" spellcheck="false">
+  <div>
+    <button id="connect" disabled>Connect and subscribe</button>
+    <button id="refresh" disabled>Refresh token / reconnect</button>
+    <button id="subscribe" disabled>Subscribe</button>
+    <button id="unsubscribe" disabled>Unsubscribe</button>
+    <button id="disconnect" disabled>Disconnect</button>
+  </div>
+  <p id="state" role="status">disconnected</p>
+  <p id="identity"></p>
+  <label for="resource">Resource ID</label>
+  <input id="resource" value="resource-42" maxlength="128">
+  <label for="resource-status">New status</label>
+  <select id="resource-status"><option value="completed">completed</option><option value="updated">updated</option></select>
+  <button id="publish" disabled>Publish resource.updated</button>
+  <p id="resource-state" role="status">No resource event received</p>
+  <p>Network recovery fetches a fresh token and restores acknowledged subscriptions. Policy close 1008 stops retries; use Refresh token / reconnect explicitly. Disconnect clears credentials and room intent. Events while offline may be missed permanently. API acceptance is not browser delivery confirmation.</p>
+  <pre id="events" aria-label="SDK events"></pre>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

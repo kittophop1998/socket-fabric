@@ -1,0 +1,18 @@
+{
+  "name": "@socketfabric/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser client for SocketFabric best-effort realtime events",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.consumer.json --noEmit",
+    "test": "npm run build && node --test --test-isolation=none test/*.test.mjs",
+    "prepack": "npm run build"
+  },
+  "devDependencies": { "typescript": "7.0.2" },
+  "engines": { "node": ">=22" }
+}

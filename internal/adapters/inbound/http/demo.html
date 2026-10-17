@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SocketFabric event demo</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #101923; color: #e3edf5; }
+    body { max-width: 1080px; margin: 0 auto; padding: 32px 20px; }
+    h1 { margin-bottom: 8px; } p { line-height: 1.6; color: #bccbd9; }
+    .clients { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-top: 28px; }
+    section { background: #172534; border: 1px solid #34485a; border-radius: 12px; padding: 22px; }
+    h2 { margin-top: 0; } label { display: block; font-weight: 600; margin: 18px 0 7px; }
+    textarea, input { box-sizing: border-box; width: 100%; background: #101923; color: #e3edf5; border: 1px solid #597184; border-radius: 6px; padding: 10px; font: inherit; }
+    textarea { min-height: 88px; font-family: ui-monospace, monospace; font-size: 12px; resize: vertical; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    button { border: 1px solid #6db3c3; border-radius: 6px; padding: 9px 12px; background: #123f4d; color: #e3edf5; cursor: pointer; font: inherit; }
+    button:disabled { opacity: .4; cursor: default; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid #a2e6f2; outline-offset: 2px; }
+    .status { min-height: 24px; margin: 16px 0 8px; font-weight: 600; color: #98dece; }
+    pre { height: 250px; overflow: auto; margin: 0; padding: 12px; background: #101923; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+    code { color: #e1f1f6; } .note { font-size: 14px; }
+    @media (max-width: 720px) { .clients { grid-template-columns: 1fr; } body { padding-top: 20px; } }
+  </style>
+</head>
+<body>
+  <h1>SocketFabric event demo</h1>
+  <p>Paste a short-lived client token in each panel and connect. Both clients join the selected room after authentication. Publish an event from your terminal using the README curl example, then watch both clients receive it.</p>
+  <p class="note">Keep the tokens scoped to the same project and room. Tokens stay in this page's memory. Reloading clears them. Network failures reconnect with backoff and authenticate again before restoring your selected subscriptions. An expired or rejected token stops retries until replaced; events sent while disconnected may be missed permanently.</p>
+  <div class="clients">
+    <section data-client="A" aria-labelledby="client-a">
+      <h2 id="client-a">Client A</h2>
+      <label for="token-a">Client token</label>
+      <textarea id="token-a" data-token autocomplete="off" spellcheck="false" placeholder="Paste a token from cmd/token"></textarea>
+      <label for="room-a">Room</label>
+      <input id="room-a" data-room value="room-a" autocomplete="off" spellcheck="false">
+      <div class="actions">
+        <button data-connect>Connect / reconnect</button>
+        <button data-join disabled>Join room</button>
+        <button data-leave disabled>Leave room</button>
+        <button data-disconnect disabled>Disconnect</button>
+        <button data-clear>Clear log</button>
+      </div>
+      <p data-status class="status" role="status">Disconnected</p>
+      <pre data-log aria-label="Client A messages"></pre>
+    </section>
+    <section data-client="B" aria-labelledby="client-b">
+      <h2 id="client-b">Client B</h2>
+      <label for="token-b">Client token</label>
+      <textarea id="token-b" data-token autocomplete="off" spellcheck="false" placeholder="Paste a token from cmd/token"></textarea>
+      <label for="room-b">Room</label>
+      <input id="room-b" data-room value="room-a" autocomplete="off" spellcheck="false">
+      <div class="actions">
+        <button data-connect>Connect / reconnect</button>
+        <button data-join disabled>Join room</button>
+        <button data-leave disabled>Leave room</button>
+        <button data-disconnect disabled>Disconnect</button>
+        <button data-clear>Clear log</button>
+      </div>
+      <p data-status class="status" role="status">Disconnected</p>
+      <pre data-log aria-label="Client B messages"></pre>
+    </section>
+  </div>
+  <script type="module" src="/demo.js"></script>
+</body>
+</html>

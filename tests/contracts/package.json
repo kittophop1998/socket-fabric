@@ -1,0 +1,12 @@
+{
+  "name": "socketfabric-contract-validation",
+  "private": true,
+  "type": "module",
+  "scripts": { "check": "node run.mjs" },
+  "devDependencies": {
+    "@asyncapi/parser": "3.6.4",
+    "@redocly/openapi-core": "2.64.1",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}
