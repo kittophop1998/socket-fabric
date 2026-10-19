@@ -6,9 +6,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/joho/godotenv"
 
 	"socketfabric/internal/adapters/outbound/auth"
 	"socketfabric/internal/config"
@@ -16,6 +19,11 @@ import (
 )
 
 func main() {
+	// A local .env is optional and never overrides variables already set in the environment.
+	if err := godotenv.Load(); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintln(os.Stderr, "invalid .env file")
+		os.Exit(1)
+	}
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, config.LoadAuth, time.Now))
 }
 

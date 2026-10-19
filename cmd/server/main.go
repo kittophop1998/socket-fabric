@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/joho/godotenv"
 
 	"socketfabric/internal/bootstrap"
 	"socketfabric/internal/config"
@@ -17,6 +21,11 @@ func main() {
 
 func run() int {
 	startupLogger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	// A local .env is optional and never overrides variables already set in the environment.
+	if err := godotenv.Load(); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		startupLogger.Error("invalid .env file", "error", err)
+		return 1
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		startupLogger.Error("invalid server configuration", "error", err)
